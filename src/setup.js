@@ -2,19 +2,23 @@
 export async function verifyDestination(env, fetcher = fetch) {
   const channel = env.DISCORD_CHANNEL_ID, token = env.DISCORD_BOT_TOKEN;
   if (!/^\d{15,22}$/.test(channel || '') || !token || /\s/.test(token)) throw new Error('Missing channel or secure token');
-  const get = async path => {
+  const get = async (path,stage) => {
     let r;
     try {r = await fetcher(`https://discord.com/api/v10${path}`,{method:'GET',redirect:'manual',
       signal:AbortSignal.timeout(20000),headers:{Authorization:`Bot ${token}`,'User-Agent':'WebbDaily (https://esawebb.org/, 1.0)'}});}
     catch {throw new Error('Discord read-only check was interrupted');}
-    if (!r.ok) {await r.body?.cancel(); throw new Error(`Discord read-only check HTTP ${r.status}`);}
+    if (!r.ok) {
+      let code = '';
+      try {const data = await r.json(); if (Number.isInteger(data.code)) code = ` (code ${data.code})`;} catch {}
+      throw new Error(`Discord ${stage} check HTTP ${r.status}${code}`);
+    }
     try {return await r.json();} catch {throw new Error('Discord read-only check returned invalid metadata');}
   };
-  const bot = await get('/users/@me');
+  const bot = await get('/users/@me','bot identity');
   if (!bot.bot || !/^\d+$/.test(bot.id || '') || (env.EXPECTED_BOT_ID && bot.id !== env.EXPECTED_BOT_ID)) throw new Error('Bot identity does not match the expected application');
-  const destination = await get(`/channels/${channel}`);
+  const destination = await get(`/channels/${channel}`,'channel access');
   if (destination.id !== channel || destination.type !== 0 || !/^\d+$/.test(destination.guild_id || '')) throw new Error('Destination is not the expected server text channel');
-  const guild = await get(`/guilds/${destination.guild_id}`);
+  const guild = await get(`/guilds/${destination.guild_id}`,'server identity');
   if (guild.id !== destination.guild_id) throw new Error('Server identity check failed');
   if (env.EXPECTED_CHANNEL_NAME && destination.name !== env.EXPECTED_CHANNEL_NAME) throw new Error('Channel name differs from the confirmed destination');
   if (env.EXPECTED_GUILD_NAME && guild.name !== env.EXPECTED_GUILD_NAME) throw new Error('Server name differs from the confirmed destination');

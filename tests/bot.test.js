@@ -134,6 +134,8 @@ test('destination check rejects mismatched identities, channels and auth errors'
   const wrongServer=await call({op:'verify',env:{...verificationEnv,EXPECTED_GUILD_NAME:'Different Server'},responses:verificationResponses()});
   assert.match(wrongServer.error,/Server name/);
   const unauthorized=await call({op:'verify',env:verificationEnv,responses:[{status:401}]});assert.match(unauthorized.error,/401/);
+  const missingAccess=await call({op:'verify',env:verificationEnv,responses:[verificationResponses()[0],{status:403,body:'{"code":50001,"message":"Missing Access"}'}]});
+  assert.match(missingAccess.error,/channel access check HTTP 403 \(code 50001\)/);
 });
 test('setup checks are cached, cannot send and require delivery disabled',async()=>{
   const x=await call({op:'verify-once',env:verificationEnv,responses:verificationResponses()});assert.equal(x.result.status,'destination-verified');
