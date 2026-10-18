@@ -1,0 +1,25 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "jwst-discord-bot",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": false,
+  "preview_urls": false,
+  "vars": {
+    "DELIVERY_ENABLED": "false",
+    "DISCORD_CHANNEL_ID": "",
+    "TIMEZONE": "America/New_York",
+    "DAILY_TIME": "12:00",
+    "CATCHUP_HOURS": "6"
+  },
+  // Hourly wake-up; civil-time gate handles daylight saving time and catch-up.
+  // For HH:MM with MM != 00, change 0 below to MM.
+  "triggers": { "crons": ["0 * * * *"] },
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "jwst-discord-bot",
+    "database_id": "00000000-0000-0000-0000-000000000000",
+    "migrations_dir": "migrations"
+  }],
+  "observability": { "enabled": true, "head_sampling_rate": 1 }
+}

@@ -1,0 +1,11 @@
+node_modules/
+.wrangler/
+dist/
+.env
+.env.*
+.dev.vars
+.dev.vars.*
+*.log
+preview.json
+wrangler.local.jsonc
+reconcile.local.sql
