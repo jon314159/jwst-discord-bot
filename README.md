@@ -1,105 +1,253 @@
 # Daily Webb Discord bot
 
-A scheduled Cloudflare Worker posts one James Webb telescope image to one Discord text channel each day. It prefers the newest unseen eligible images from the official [ESA/Webb image feed](https://esawebb.org/images/feed/), then walks the [official archive](https://esawebb.org/images/). The default schedule is noon **America/New_York**, including daylight saving time.
+A Discord bot that posts one James Webb Space Telescope image each day using Cloudflare Workers and D1. It checks the newest releases in the [official ESA/Webb gallery][webb-gallery], then selects from the archive when there is no new image to share.
 
-Every post says **Archive selection**, gives the original release date, includes an excerpt of the official caption, preserves the full image credit, and links the original image page and reuse terms. This is an independent bot; NASA/ESA/STScI do not endorse it. Images are not necessarily newly released every day.
+Posts include the original release date, an excerpt of the official caption, the full image credit, and a link to the source. Every post is labeled **Archive selection**, so an older image is never presented as a new release.
 
-**Safe default: delivery disabled.** Creating credentials, granting account access, installing the bot, and enabling real delivery require the owner's explicit setup/approval. The repository itself can be public; secrets, deployment configuration and runtime state must remain private. Live setup is tracked in the owner's ignored local configuration, not in this public template.
+## Quick links
 
-## Architecture
+| Resource | Link |
+| --- | --- |
+| Browse the photos | [ESA/Webb image gallery][webb-gallery] |
+| Create or manage a Discord application | [Discord Developer Portal][discord-portal] |
+| Manage the Worker and database | [Cloudflare dashboard][cloudflare-dashboard] |
+| Configuration template | [wrangler.jsonc](wrangler.jsonc) |
+| Test results | [Validation record](VALIDATION.md) |
 
-- JavaScript Worker, zero production npm dependencies; native `fetch`, `HTMLRewriter`, `Intl`, Web Crypto, and D1.
-- Discord bot account through API v10 REST. No Gateway connection, message reader, webhooks, slash command registration, or privileged intents. The bot may appear offline in Discord because no presence connection is opened.
-- D1 reserves a civil-date slot before source discovery, and an image before the Discord POST. Concurrent invocations and restarts cannot intentionally duplicate the date, image URL, or release family. Clean/annotated variants from the same `weic`/`potm` release count as one family. Visually similar pictures from different official releases can still occur; there is no perceptual-image fingerprinting.
-- A pending/uncertain POST blocks subsequent delivery until reconciled. This chooses duplicate prevention over automatic retransmission after an ambiguous network failure; it does not promise distributed exactly-once delivery.
-- Each source request has a 20-second timeout, at most three attempts, a 2 MB response limit and one-second spacing. Discovery has a 32-request hard budget, at most six detail inspections and 20 archive pages. Discord 429s honor `retry_after` for up to three attempts and 60 seconds per wait. Other ambiguous POST outcomes are never retried automatically.
-- No-repeat history is never reset automatically. Exhaustion, changed metadata, a rights exception, or a source outage skips the day instead of reposting old content. A failed/skipped date stays consumed; the next date can try again. A killed run in `selecting` cannot have posted, so it does not block future dates; a killed run in `pending` does.
-- Ineligible image IDs are cached for 30 days, so a feed full of charts cannot permanently consume every daily inspection budget. They are reconsidered later in case official metadata was corrected.
-- The production HTTP handler always returns 404, and `workers.dev`/preview URLs are disabled. Tests/preview use a separate local harness that is not in the deployment bundle.
+The [ESA/Webb RSS feed (XML)][webb-feed] is the machine-readable source used by the bot. It may display XML or download a feed file when opened in a browser. Use the gallery above to browse images.
 
-## Local check — no Discord or Cloudflare account needed
+## Contents
 
-Install Node.js 22 or newer with npm, then run inside this directory:
+- [Features](#features)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Discord setup](#discord-setup)
+- [Cloudflare deployment](#cloudflare-deployment)
+- [Configuration](#configuration)
+- [Testing](#testing)
+- [Troubleshooting](#troubleshooting)
+- [Image sources and credits](#image-sources-and-credits)
+- [Reference links](#reference-links)
+
+## Features
+
+- Daily posting at **12:00 America/New_York** by default, with daylight saving time support.
+- Preference for the newest unseen Webb observations, followed by archive selections.
+- Persistent D1 history that prevents repeat dates, image URLs, and variants from the same release.
+- Full image credits and source links, with all Discord mentions disabled.
+- Bounded retries for source requests and Discord rate limits.
+- No always-on computer or Discord Gateway connection required.
+- Zero third-party runtime dependencies; Wrangler and Miniflare are development tools.
+
+The bot posts through Discord's REST API and may appear **offline** in the member list. This is normal.
+
+## Requirements
+
+- Node.js 22 or newer, npm, and Git.
+- A Discord account with permission to install a bot in the destination server.
+- A Cloudflare account with Workers and D1 enabled.
+
+The daily workload is designed for Workers Free and D1 Free. See [Workers limits][workers-limits] and [D1 pricing][d1-pricing] for current allowances.
+
+## Installation
 
 ```sh
+git clone https://github.com/jon314159/jwst-discord-bot.git
+cd jwst-discord-bot
 npm ci
 npm test
 npm run check
+```
+
+Copy [wrangler.jsonc](wrangler.jsonc) to `wrangler.local.jsonc`. Use the local copy for your channel and database settings; it is excluded from Git.
+
+`npm run check` builds the Worker without deploying it. You can also generate a message preview without a Discord token:
+
+```sh
 npm run preview
-# Optional read-only GETs to official ESA/Webb; never contacts Discord:
 npm run preview -- --live
 ```
 
-Miniflare runs tests in the actual local Workers runtime with native HTMLRewriter and local D1. Discord POSTs are mocks. Tests include source fixtures, observation/rights filters, credits, DST, races, restart history, uncertain outcomes, HTTP refusal and rate limits. `npm run check` is a dry-run build, not a deployment. Install tools only in this project; no shared Hermes environment is needed.
+The first command uses a saved official fixture. `--live` reads the current ESA/Webb source. Neither command sends a Discord message.
 
-## Discord setup — owner action, when approved
+## Discord setup
 
-1. Open the [Discord Developer Portal](https://discord.com/developers/applications). Create an application such as **Daily Webb**. On its **Bot** page, configure its bot user and generate/reset its bot token only when ready for secure handoff. Leave **Presence**, **Server Members**, and **Message Content** privileged intents off. Do not enable public installation unless you want other servers to install it.
-2. Under **Installation**, use **Guild Install** with the `bot` scope. Grant only **View Channel**, **Send Messages**, and **Embed Links** (permission integer `19456`). Do not grant Administrator, Manage Messages, Read Message History, Attach Files, or mention-everyone permission. This implementation only supports an ordinary server text channel; threads need additional permissions and are not configured here.
-3. Use the generated install link and select the intended server yourself. This OAuth/server installation grants ongoing access and should be approved by the server owner. The application ID is public; the bot token is secret.
-4. Supply the destination text channel ID after it is chosen: Discord **User Settings → Advanced → Developer Mode**, then right-click the text channel → **Copy Channel ID**. Check channel overrides allow the three permissions above.
-5. Enter the token directly into Cloudflare's encrypted secret interface or the Wrangler hidden prompt in the next section. Never paste it into chat, source code, Git, command arguments, screenshots or logs. Do not use a Discord user-account token. Rotate a bot token if it is ever exposed.
+1. Open the [Discord Developer Portal][discord-portal] and create an application, such as **Daily Webb**.
+2. On the **Bot** page, leave **Presence Intent**, **Server Members Intent**, and **Message Content Intent** off.
+3. Under **Installation**, select **Guild Install** and the `bot` scope. Grant **View Channels**, **Send Messages**, and **Embed Links** only. The permission integer is `19456`.
+4. Open the generated install link, select your server, and complete the authorization. Check that the bot appears in that server's member list, including the offline section.
+5. In Discord, enable **User Settings > Advanced > Developer Mode**. Right-click the destination text channel and select **Copy Channel ID**. Set `DISCORD_CHANNEL_ID` in `wrangler.local.jsonc` to that ID.
 
-## Cloudflare free-tier setup — owner action, when approved
+Use an ordinary server text channel. Threads are not configured by this project. Check channel permission overrides if the bot cannot see or post in the channel.
 
-Use **Workers Free** and **D1 Free**. No domain, paid Worker plan, subscription upgrade, third-party host, or always-on PC is required. Confirm your account is on the free plan and review its quotas. Source requests and CPU use depend on archive depth; this has been built/tested locally, not measured on a live account. Cloudflare's free CPU limit is 10 ms per invocation; native HTMLRewriter avoids a JavaScript DOM dependency. A production CPU/quota error should be diagnosed before enabling delivery; this project does not automatically upgrade or incur paid-plan access.
+You will create the bot token and store it as a Cloudflare secret during deployment below. No privileged intents, Administrator permission, message history access, or slash command registration are required.
 
-1. Sign in yourself at the [Cloudflare dashboard](https://dash.cloudflare.com/). When explicitly approved, run `npx wrangler login` and review the requested OAuth grant yourself, or use an already approved account. Never transmit an account API token through chat. No automatic account authorization is part of this project.
-2. Create the small database and record its returned ID:
+## Cloudflare deployment
 
-   ```sh
-   npx wrangler d1 create jwst-discord-bot
-   ```
+First, open **Compute > Workers & Pages** in the [Cloudflare dashboard][cloudflare-dashboard] to complete any initial Workers setup. The Worker's public `workers.dev` address can remain disabled; Cron Triggers handle delivery.
 
-3. Replace only the all-zero `database_id` placeholder in `wrangler.jsonc`. An actual database ID/account setup and real channel ID belong in an ignored local copy, not a public commit. For example, copy to `wrangler.local.jsonc`, replace its placeholder, and pass `--config wrangler.local.jsonc` on all subsequent commands. Set its `DISCORD_CHANNEL_ID` to the chosen channel. Keep `DELIVERY_ENABLED` as `"false"`.
-4. Apply the schema and deploy while disabled:
+### 1. Sign in
 
-   ```sh
-   npx wrangler d1 migrations apply jwst-discord-bot --remote --config wrangler.local.jsonc
-   npx wrangler deploy --config wrangler.local.jsonc
-   ```
+```sh
+npx wrangler login --scopes account:read user:read workers_scripts:write d1:write workers_tail:read
+```
 
-5. Store the Discord token securely. Cloudflare Dashboard → **Workers & Pages → jwst-discord-bot → Settings → Variables and Secrets → Add → Secret**, name `DISCORD_BOT_TOKEN`; enter the token directly. Alternatively use the hidden prompt (do not append the token):
+Complete the sign-in in your browser. These scopes cover account information, Worker deployment, D1, and logs.
 
-   ```sh
-   npx wrangler secret put DISCORD_BOT_TOKEN --config wrangler.local.jsonc
-   ```
+### 2. Create the database
 
-6. Verify the intended channel, token, source preview, deployment and permissions. Obtain approval to start posting. Then set `DELIVERY_ENABLED` to `"true"` in the ignored local config and redeploy it. Never test with a real POST before the channel and delivery approval are supplied. The first enabled run in the current day's noon-to-6pm window can post that day.
-7. Inspect the next scheduled invocation and D1 record. `sent` with a message ID confirms the request succeeded. Cron changes may take several minutes to propagate, and scheduling is best effort rather than second-exact. There is no forced-post public endpoint.
+```sh
+npx wrangler d1 create jwst-discord-bot --update-config false --config wrangler.local.jsonc
+```
 
-The hourly UTC cron is only a wake-up; the Worker checks local civil time using `TIMEZONE`. For a different `DAILY_TIME`, set `HH:MM` and adjust the cron minute to `MM` (e.g. `30 * * * *` for `12:30`). Non-whole-hour-offset zones may require a different UTC cron minute. With the default settings, noon is 16:00 UTC in New York summer and 17:00 UTC in winter. Only today's date is eligible; missed previous dates are not replayed. `CATCHUP_HOURS` defaults to 6, and the end of that window is exclusive. Repeated times on DST fall-back still share one date slot; a nonexistent scheduled local time is picked up at the first cron tick after it within the grace window.
+Copy the returned `database_id` into the D1 entry in `wrangler.local.jsonc`, replacing the all-zero placeholder. Keep its binding name as `DB`.
 
-## Operations and reconciliation
+Apply the schema:
 
-For an optional read-only destination check after storing the secret, add a unique `SETUP_CHECK_ID` (8–64 letters/digits/hyphens) to the ignored local config. Keep `DELIVERY_ENABLED` at `"false"`. Set `EXPECTED_BOT_ID`, `EXPECTED_GUILD_NAME`, and `EXPECTED_CHANNEL_NAME` to the confirmed identities. A scheduled invocation uses only Discord GET requests to check the bot, channel and server, then caches its sanitized result in D1 `meta` under `setup:<SETUP_CHECK_ID>`. The token remains inside Cloudflare. This mode never sends a message and refuses to run while delivery is enabled. Remove `SETUP_CHECK_ID` after verification, and restore the normal hourly cron if a temporary test cron was used. There is no public verification endpoint.
+```sh
+npx wrangler d1 migrations apply jwst-discord-bot --remote --config wrangler.local.jsonc
+```
 
-For an approved single-day test post, set `SINGLE_POST_DATE` to the intended local date (`YYYY-MM-DD`) in the ignored local config before enabling delivery. The regular daily time gate and D1 reservation still apply, and later dates cannot post while this guard remains set. After the test, disable delivery again and restore the normal schedule. Only remove the date guard and enable recurring delivery when the owner approves it.
+### 3. Deploy with posting disabled
 
-Pause by setting `DELIVERY_ENABLED` to `"false"` in the local config and redeploying, or remove its Cron Trigger. Keep the D1 database to preserve no-repeat history. Check status without reading Discord messages:
+Leave `DELIVERY_ENABLED` set to `"false"` and deploy:
+
+```sh
+npx wrangler deploy --config wrangler.local.jsonc
+```
+
+### 4. Add the bot token
+
+In the Discord Developer Portal, open your application's **Bot** page and use **Reset Token** to create a token. Store it directly in Cloudflare using the hidden prompt:
+
+```sh
+npx wrangler secret put DISCORD_BOT_TOKEN --config wrangler.local.jsonc
+```
+
+You can also use **Worker > Settings > Variables and Secrets > Add** in the Cloudflare dashboard. Choose **Secret**, use the name `DISCORD_BOT_TOKEN`, enter the value, and deploy the change.
+
+Keep tokens out of source files, command arguments, and Git. Use a bot token, never a Discord user-account token.
+
+### 5. Start posting
+
+Confirm the channel ID, set `DELIVERY_ENABLED` to `"true"` in `wrangler.local.jsonc`, and deploy again:
+
+```sh
+npx wrangler deploy --config wrangler.local.jsonc
+```
+
+The first run within today's scheduled posting window can post immediately. A successful post consumes that date's slot, so subsequent runs cannot post another image that day.
+
+Cron changes can take [up to 15 minutes to propagate][cloudflare-cron]. The HTTP handler returns 404; there is no public posting endpoint.
+
+## Configuration
+
+Set these values in `wrangler.local.jsonc`:
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `DELIVERY_ENABLED` | `"false"` | Set to `"true"` to enable posting. |
+| `DISCORD_CHANNEL_ID` | Empty | Destination server text channel ID. |
+| `TIMEZONE` | `"America/New_York"` | IANA timezone used for the daily date and time. |
+| `DAILY_TIME` | `"12:00"` | Local posting time in `HH:MM` format. |
+| `CATCHUP_HOURS` | `"6"` | Number of hours after the scheduled time in which today's post may run. |
+
+The default cron, `0 * * * *`, wakes the Worker hourly. The Worker checks local time and posts once per date. Noon in New York is 16:00 UTC in summer and 17:00 UTC in winter.
+
+For a different posting minute, update the cron as well as `DAILY_TIME`. For example, use `30 * * * *` for `12:30` in New York. Timezones with half-hour or quarter-hour UTC offsets need the corresponding UTC cron minute.
+
+Missed previous dates are not replayed. The catch-up window's end is exclusive. Repeated times during daylight saving fall-back share one daily slot; a nonexistent local time is picked up by the next eligible cron tick.
+
+To pause delivery, set `DELIVERY_ENABLED` to `"false"` and redeploy. Keep the D1 database to preserve image history.
+
+## Testing
+
+`npm test` runs in Miniflare's local Workers runtime with native HTMLRewriter, local D1, source fixtures, and mocked Discord requests. It covers credits, image filtering, scheduling, concurrent runs, no-repeat history, rate limits, and interrupted deliveries. See the [validation record](VALIDATION.md) for results.
+
+### Check the destination without posting
+
+Keep `DELIVERY_ENABLED` at `"false"` and add these optional values to the local configuration:
+
+- `SETUP_CHECK_ID`: a unique name of 8–64 letters, digits, or hyphens.
+- `EXPECTED_BOT_ID`: your application's bot ID.
+- `EXPECTED_GUILD_NAME`: the expected server name.
+- `EXPECTED_CHANNEL_NAME`: the expected channel name, without `#`.
+
+The next scheduled run checks the bot, channel, and server using Discord GET requests. It saves the result in D1 `meta` under `setup:<SETUP_CHECK_ID>`. A check ID is cached; use a new one to recheck after correcting permissions. Remove `SETUP_CHECK_ID` or set it to an empty string when finished.
+
+### Limit a live test to one date
+
+Set `SINGLE_POST_DATE` to the intended local date in `YYYY-MM-DD` format before enabling delivery. The usual time window and daily reservation still apply, and later dates cannot post while this setting remains set.
+
+After testing, disable delivery or remove `SINGLE_POST_DATE` to continue daily posting.
+
+## Troubleshooting
+
+| Symptom | What to check |
+| --- | --- |
+| Bot appears offline | Expected: the bot uses REST and has no presence connection. |
+| Discord `401` | Check the bot token stored in `DISCORD_BOT_TOKEN`. |
+| Discord `403` or `Missing Access` | Install the bot in the correct server and check the destination channel's permissions. |
+| No post yet | Check `DELIVERY_ENABLED`, the local posting window, Cron propagation, and whether today's slot was already handled. |
+| Source selection skipped | Check the official source and the saved reason. Changed metadata, unavailable sources, and archive exhaustion skip the day rather than repeat an image. |
+| Delivery is `pending` or `uncertain` | Inspect the channel and reconcile the record as described below. |
+| Database belongs to another channel | Use a separate D1 database when changing channels. |
+
+Inspect recent delivery records:
 
 ```sh
 npx wrangler d1 execute jwst-discord-bot --remote --config wrangler.local.jsonc --command "SELECT day,image_id,status,message_id,note FROM deliveries ORDER BY day DESC LIMIT 14"
 ```
 
-If a record is `pending` or `uncertain`, **first inspect the actual Discord channel yourself**. Disable delivery while reconciling. If the post exists, copy its message ID and mark that exact date as sent. If you confirm it does not exist, mark the date failed. Replace the example date/ID with inspected values:
+### Reconcile an interrupted delivery
+
+The Worker reserves an image before sending it. If a network failure or interrupted run leaves the outcome unclear, it stops further delivery to prevent duplicates.
+
+Pause delivery and inspect the actual Discord channel. If the post exists, copy its message ID and mark that date as sent:
 
 ```sql
-UPDATE deliveries SET status='sent',message_id='ACTUAL_MESSAGE_ID',note='Owner reconciled',updated=datetime('now')
-WHERE day='YYYY-MM-DD' AND status IN ('pending','uncertain');
--- OR, only after confirming no post exists:
-UPDATE deliveries SET status='failed',note='Owner confirmed no delivery',updated=datetime('now')
+UPDATE deliveries
+SET status='sent', message_id='ACTUAL_MESSAGE_ID',
+    note='Manually reconciled', updated=datetime('now')
 WHERE day='YYYY-MM-DD' AND status IN ('pending','uncertain');
 ```
 
-Run the chosen SQL through D1's dashboard query console or `wrangler d1 execute --file` from an ignored local file. Never delete a successful record to retry a day. Resolved dates remain consumed. No bot message-reading permission is needed. If changing to another channel, use a separate database; the first enabled run pins the database to its channel to prevent accidental routing changes.
+If you confirm no post exists, mark the date as failed:
 
-For a source failure, inspect the source and parser before changing the adapter. For Discord 401/403, fix the token/channel permissions rather than repeatedly invoking it. Logs contain status or a generic failure message, never tokens, request headers or complete environment dumps. Keep database exports, local configuration and secrets out of Git.
+```sql
+UPDATE deliveries
+SET status='failed', note='Confirmed no delivery', updated=datetime('now')
+WHERE day='YYYY-MM-DD' AND status IN ('pending','uncertain');
+```
 
-## Sources and reuse
+Run the appropriate query in the D1 dashboard or with `wrangler d1 execute --file`. Resolved dates remain consumed. Never delete a successful record to retry a post.
 
-The official RSS endpoint and archive pagination were verified with real read-only GETs on 2026-10-18. The server rejected the default Python user agent but accepted the browser-compatible bot user agent used here. RSS supplies links/dates/captions/enclosures but **does not supply full credits**; the bot therefore validates the original detail page. It requires `Type: Observation`, positive Webb identification, title, caption, full credit, release date and an official HTTPS image host. Illustrations, spectra, charts, spacecraft and apparent restrictive rights exceptions are excluded. Selection is conservative metadata filtering, not computer vision; Webb/Hubble composites can qualify when the source identifies Webb data.
+## Image sources and credits
 
-[ESA/Webb's reuse terms](https://esawebb.org/copyright/) generally release image/text content under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) with each full credit shown unaltered and online credit links active; individual exceptions take precedence. The bot preserves credit text/link wording and visibly credits caption text to ESA/Webb. Captions may be shortened with an ellipsis and the complete caption remains linked. It uses official hosted image URLs without editing the image binary, and does not use ESA logos.
+The bot uses the [ESA/Webb gallery][webb-gallery] and [RSS feed (XML)][webb-feed]. RSS provides image links and dates, but the full credit comes from each original image page. Eligible entries must have `Type: Observation`, identify Webb data, and include a title, caption, release date, credit, and official HTTPS image URL. Illustrations, spectra, charts, spacecraft images, and apparent restrictive rights exceptions are excluded. Webb/Hubble composites can qualify when the source identifies Webb data.
 
-Technical references: [Discord Create Message](https://docs.discord.com/developers/resources/message#create-message), [Discord rate limits](https://docs.discord.com/developers/topics/rate-limits), [Cloudflare Cron Triggers](https://developers.cloudflare.com/workers/configuration/cron-triggers/), [Workers limits](https://developers.cloudflare.com/workers/platform/limits/), [D1 pricing](https://developers.cloudflare.com/d1/platform/pricing/).
+D1 tracks the image URL and release family so clean, annotated, and alternate variants from the same `weic` or `potm` release are not posted separately. This is metadata-based filtering, not visual duplicate detection. Rejected metadata is cached for 30 days and then reconsidered.
+
+[ESA/Webb's reuse terms][webb-reuse] generally release images and text under [CC BY 4.0][cc-by], subject to per-image exceptions. Posts preserve the full visible image credit and its links, credit captions to ESA/Webb, and link to the complete caption. Shortened captions end with an ellipsis. Image files are displayed without modification.
+
+This is an independent project and does not imply endorsement by NASA, ESA, CSA, or STScI.
+
+## Reference links
+
+- [Discord: Create Message API][discord-create-message]
+- [Discord: API rate limits][discord-rate-limits]
+- [Cloudflare: Cron Triggers and scheduling][cloudflare-cron]
+- [Cloudflare: Workers limits][workers-limits]
+- [Cloudflare: D1 pricing and free allowances][d1-pricing]
+
+[webb-gallery]: https://esawebb.org/images/
+[webb-feed]: https://esawebb.org/images/feed/
+[discord-portal]: https://discord.com/developers/applications
+[cloudflare-dashboard]: https://dash.cloudflare.com/
+[webb-reuse]: https://esawebb.org/copyright/
+[cc-by]: https://creativecommons.org/licenses/by/4.0/
+[discord-create-message]: https://docs.discord.com/developers/resources/message#create-message
+[discord-rate-limits]: https://docs.discord.com/developers/topics/rate-limits
+[cloudflare-cron]: https://developers.cloudflare.com/workers/configuration/cron-triggers/
+[workers-limits]: https://developers.cloudflare.com/workers/platform/limits/
+[d1-pricing]: https://developers.cloudflare.com/d1/platform/pricing/
