@@ -1,4 +1,4 @@
-# Validation record — 2026-10-18
+# Initial release validation — 2026-10-18
 
 - **16/16 tests passed** in the local Cloudflare Workers runtime (Miniflare/workerd), with native HTMLRewriter and real local D1 storage. Tests used fixture sources and mocked Discord; no Discord account/token was involved.
 - **Wrangler deployment dry run passed.** Bundle: 20.31 KiB, 7.03 KiB gzip. Delivery binding remained `false`, channel remained empty, database ID remained the all-zero placeholder. This was not a live deployment.
@@ -8,3 +8,9 @@
 - Public-file review included the complete intended file list and initial Git history. No real Discord token/channel, Cloudflare credential/account/database configuration, local runtime state or unrelated projects were included. The Git author uses a GitHub noreply address.
 
 Not verified yet: live Cloudflare account quotas/CPU behavior, deployed Cron Trigger execution, actual Discord credentials/channel permissions, or real delivery. Those require the owner's secure setup and delivery authorization. Keep delivery disabled until then.
+
+## Guided-setup safety additions — 2026-10-18
+
+- **20/20 local tests passed**, including the new GET-only destination verification, identity mismatch rejection, cached setup checks, disabled-delivery requirement and single-day test guard.
+- Updated dry-run bundle: **23.35 KiB / 7.75 KiB gzip**. No third-party runtime dependency was added.
+- Setup verification and real deployment details are intentionally excluded from the public configuration. Owner-managed tokens are entered directly into Cloudflare's encrypted secret form and are never copied into this repository.

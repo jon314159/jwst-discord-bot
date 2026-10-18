@@ -13,7 +13,7 @@ const detail = (id='weic2621d',extra='') => `<meta property="og:image:secure_url
 const pages = ids => Object.fromEntries([['https://esawebb.org/images/feed/',feed(ids)],...ids.map(id=>[`https://esawebb.org/images/${id}/`,detail(id)])]);
 async function call(x) { return (await mf.dispatchFetch('https://local.test/',{method:'POST',body:JSON.stringify(x)})).json(); }
 before(async()=>{
-  const modules = ['tests/harness.js','src/source.js','src/state.js','src/discord.js','src/worker.js'].map(path=>({type:'ESModule',path:fileURLToPath(new URL(path,root))}));
+  const modules = ['tests/harness.js','src/source.js','src/state.js','src/discord.js','src/worker.js','src/setup.js'].map(path=>({type:'ESModule',path:fileURLToPath(new URL(path,root))}));
   mf = new Miniflare(convertV4MiniflareOptions({modules,modulesRoot:fileURLToPath(root),compatibilityDate:'2026-10-01',d1Databases:['DB']}));
   db = await mf.getD1Database('DB');
   await db.exec((await readFile(new URL('migrations/0001_initial.sql',root),'utf8')).replace(/\s+/g,' '));
@@ -115,4 +115,32 @@ test('auth errors are definitive; 5xx/redirects/invalid success are uncertain; n
 test('source network retries are bounded and off-domain redirects refused',async()=>{
   const x=await call({op:'get',url:'https://esawebb.org/images/feed/',responses:Array(3).fill({throws:true})});assert.equal(x.calls.length,3);assert.match(x.error,/3 attempts/);
   const y=await call({op:'get',url:'https://esawebb.org/images/feed/',responses:[{status:302,headers:{location:'https://evil.test/'}}]});assert.equal(y.calls.length,1);assert.match(y.error,/Unsafe/);
+});
+const verificationEnv={...env,DELIVERY_ENABLED:'false',EXPECTED_BOT_ID:'333333333333333333',EXPECTED_GUILD_NAME:'Fixture Server',EXPECTED_CHANNEL_NAME:'general',SETUP_CHECK_ID:'fixture-check-01'};
+const verificationResponses=()=>[
+  {status:200,body:JSON.stringify({id:'333333333333333333',bot:true,username:'Daily Webb'})},
+  {status:200,body:JSON.stringify({id:channel,type:0,name:'general',guild_id:'444444444444444444'})},
+  {status:200,body:JSON.stringify({id:'444444444444444444',name:'Fixture Server'})}
+];
+test('secure destination check uses GET only and verifies bot, server and channel',async()=>{
+  const x=await call({op:'verify',env:verificationEnv,responses:verificationResponses()});
+  assert.equal(x.result?.status,'destination-verified',JSON.stringify(x));
+  assert.equal(x.result.channelName,'general');assert.ok(x.calls.every(c=>c.method==='GET'));
+  assert.ok(!JSON.stringify(x.result).includes('mock-token'));
+});
+test('destination check rejects mismatched identities, channels and auth errors',async()=>{
+  const wrongBot=await call({op:'verify',env:{...verificationEnv,EXPECTED_BOT_ID:'555555555555555555'},responses:verificationResponses()});
+  assert.match(wrongBot.error,/Bot identity/);
+  const wrongServer=await call({op:'verify',env:{...verificationEnv,EXPECTED_GUILD_NAME:'Different Server'},responses:verificationResponses()});
+  assert.match(wrongServer.error,/Server name/);
+  const unauthorized=await call({op:'verify',env:verificationEnv,responses:[{status:401}]});assert.match(unauthorized.error,/401/);
+});
+test('setup checks are cached, cannot send and require delivery disabled',async()=>{
+  const x=await call({op:'verify-once',env:verificationEnv,responses:verificationResponses()});assert.equal(x.result.status,'destination-verified');
+  const cached=await call({op:'verify-once',env:verificationEnv});assert.equal(cached.result.status,'destination-verified');assert.equal(cached.calls.length,0);
+  const enabled=await call({op:'verify-once',env:{...verificationEnv,DELIVERY_ENABLED:'true'}});assert.match(enabled.error,/disabled/);assert.equal(enabled.calls.length,0);
+});
+test('single-date test cannot continue sending on later dates',async()=>{
+  const x=await call({op:'run',env:{...env,SINGLE_POST_DATE:'2026-10-18'},now:'2026-10-18T16:00:00Z',pages:pages(['weic2621d'])});assert.equal(x.result.status,'sent');
+  const y=await call({op:'run',env:{...env,SINGLE_POST_DATE:'2026-10-18'},now:'2026-10-19T16:00:00Z',pages:pages(['weic2620a'])});assert.equal(y.result.status,'outside-single-post-date');assert.equal(y.calls.length,0);
 });

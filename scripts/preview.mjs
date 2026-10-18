@@ -4,7 +4,7 @@ import {fileURLToPath} from 'node:url';
 import {Miniflare,convertV4MiniflareOptions} from 'miniflare';
 import {FEED,SourceHTTP,feedLinks} from '../src/source.js';
 const root = new URL('../',import.meta.url);
-const modules = ['tests/harness.js','src/source.js','src/state.js','src/discord.js','src/worker.js'].map(path=>({type:'ESModule',path:fileURLToPath(new URL(path,root))}));
+const modules = ['tests/harness.js','src/source.js','src/state.js','src/discord.js','src/worker.js','src/setup.js'].map(path=>({type:'ESModule',path:fileURLToPath(new URL(path,root))}));
 const mf = new Miniflare(convertV4MiniflareOptions({modules,modulesRoot:fileURLToPath(root),compatibilityDate:'2026-10-01'}));
 const call = async x => (await mf.dispatchFetch('https://preview.local/',{method:'POST',body:JSON.stringify(x)})).json();
 try {

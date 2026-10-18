@@ -4,7 +4,7 @@ A scheduled Cloudflare Worker posts one James Webb telescope image to one Discor
 
 Every post says **Archive selection**, gives the original release date, includes an excerpt of the official caption, preserves the full image credit, and links the original image page and reuse terms. This is an independent bot; NASA/ESA/STScI do not endorse it. Images are not necessarily newly released every day.
 
-**Current state: code prepared; delivery disabled.** No Discord application, token, installation, Cloudflare database, or live deployment has been created by this project. Creating credentials, granting account access, installing the bot, and enabling real delivery require the owner's explicit setup/approval. The repository itself can be public; secrets and runtime state must remain private.
+**Safe default: delivery disabled.** Creating credentials, granting account access, installing the bot, and enabling real delivery require the owner's explicit setup/approval. The repository itself can be public; secrets, deployment configuration and runtime state must remain private. Live setup is tracked in the owner's ignored local configuration, not in this public template.
 
 ## Architecture
 
@@ -71,6 +71,10 @@ Use **Workers Free** and **D1 Free**. No domain, paid Worker plan, subscription 
 The hourly UTC cron is only a wake-up; the Worker checks local civil time using `TIMEZONE`. For a different `DAILY_TIME`, set `HH:MM` and adjust the cron minute to `MM` (e.g. `30 * * * *` for `12:30`). Non-whole-hour-offset zones may require a different UTC cron minute. With the default settings, noon is 16:00 UTC in New York summer and 17:00 UTC in winter. Only today's date is eligible; missed previous dates are not replayed. `CATCHUP_HOURS` defaults to 6, and the end of that window is exclusive. Repeated times on DST fall-back still share one date slot; a nonexistent scheduled local time is picked up at the first cron tick after it within the grace window.
 
 ## Operations and reconciliation
+
+For an optional read-only destination check after storing the secret, add a unique `SETUP_CHECK_ID` (8–64 letters/digits/hyphens) to the ignored local config. Keep `DELIVERY_ENABLED` at `"false"`. Set `EXPECTED_BOT_ID`, `EXPECTED_GUILD_NAME`, and `EXPECTED_CHANNEL_NAME` to the confirmed identities. A scheduled invocation uses only Discord GET requests to check the bot, channel and server, then caches its sanitized result in D1 `meta` under `setup:<SETUP_CHECK_ID>`. The token remains inside Cloudflare. This mode never sends a message and refuses to run while delivery is enabled. Remove `SETUP_CHECK_ID` after verification, and restore the normal hourly cron if a temporary test cron was used. There is no public verification endpoint.
+
+For an approved single-day test post, set `SINGLE_POST_DATE` to the intended local date (`YYYY-MM-DD`) in the ignored local config before enabling delivery. The regular daily time gate and D1 reservation still apply, and later dates cannot post while this guard remains set. After the test, disable delivery again and restore the normal schedule. Only remove the date guard and enable recurring delivery when the owner approves it.
 
 Pause by setting `DELIVERY_ENABLED` to `"false"` in the local config and redeploying, or remove its Cron Trigger. Keep the D1 database to preserve no-repeat history. Check status without reading Discord messages:
 

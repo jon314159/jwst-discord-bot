@@ -1,6 +1,7 @@
 import {SourceHTTP, chooseImage, SourceError} from './source.js';
 import {D1State} from './state.js';
 import {makePayload, sendDiscord, UncertainDelivery} from './discord.js';
+import {verifyOnce} from './setup.js';
 
 export function config(env) {
   const timeZone = env.TIMEZONE || 'America/New_York', dailyTime = env.DAILY_TIME || '12:00';
@@ -22,6 +23,8 @@ export async function run(env, {now = new Date(), http = new SourceHTTP(), fetch
   if (!/^\d{15,22}$/.test(env.DISCORD_CHANNEL_ID || '') || !env.DISCORD_BOT_TOKEN || /\s/.test(env.DISCORD_BOT_TOKEN)) throw new Error('Channel and secure Discord token required before enabling delivery');
   const day = dueDay(now, config(env));
   if (!day) return {status:'outside-window'};
+  // Optional one-day test guard: an enabled test can never become daily delivery.
+  if (env.SINGLE_POST_DATE && day !== env.SINGLE_POST_DATE) return {status:'outside-single-post-date'};
   if (!await state.claim(day, env.DISCORD_CHANNEL_ID)) return {status:'already-handled',day};
   let image;
   try { image = await chooseImage(http, await state.used(), day, (id,reason)=>state.reject(id,reason)); }
@@ -47,7 +50,7 @@ export default {
   fetch() { return new Response('Not found',{status:404}); },
   async scheduled(controller, env) {
     controller.noRetry(); // Retries of a POST must follow our durable state, never platform replay.
-    try { console.log(JSON.stringify(await run(env))); }
+    try { console.log(JSON.stringify(env.SETUP_CHECK_ID ? await verifyOnce(env) : await run(env))); }
     catch { console.error('Daily Webb run stopped; check D1 status and Cloudflare invocation diagnostics. No credentials logged.'); }
   }
 };
