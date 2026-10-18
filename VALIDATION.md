@@ -14,3 +14,10 @@ Not verified yet: live Cloudflare account quotas/CPU behavior, deployed Cron Tri
 - **20/20 local tests passed**, including the new GET-only destination verification, identity mismatch rejection, cached setup checks, disabled-delivery requirement and single-day test guard.
 - Updated dry-run bundle: **23.35 KiB / 7.75 KiB gzip**. No third-party runtime dependency was added.
 - Setup verification and real deployment details are intentionally excluded from the public configuration. Owner-managed tokens are entered directly into Cloudflare's encrypted secret form and are never copied into this repository.
+
+## End-to-end deployment validation — 2026-10-18
+
+- **21/21 local tests passed**, including a regression for Workers' native `fetch` receiver requirements. The source HTTP client wraps injected fetch functions so they are called without binding them to the client instance.
+- A read-only check inside Cloudflare verified the configured bot identity, server and channel using the owner's encrypted secret, without retrieving its value into the development environment.
+- An explicitly authorized live test successfully fetched an official ESA/Webb observation, posted it to the confirmed channel, and persisted Discord's successful message ID in D1. Private destination identifiers and message links are intentionally omitted here.
+- Recurring delivery is controlled by the owner's ignored local deployment configuration. The public template remains disabled with no channel or account identifiers.

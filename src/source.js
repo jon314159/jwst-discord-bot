@@ -31,7 +31,12 @@ export const family = id => id.toLowerCase().replace(/^((?:weic|potm)\d+)[a-z]+$
 export const escapeMd = s => s.replace(/[\\`*_{}\[\]()~|<>]/g, '\\$&');
 
 export class SourceHTTP {
-  constructor(fetcher = fetch, pause = sleep) { this.fetcher = fetcher; this.pause = pause; this.last = 0; this.calls = 0; }
+  constructor(fetcher = fetch, pause = sleep) {
+    // Workers' native fetch must be invoked as a free function, not as a method
+    // whose receiver is this SourceHTTP instance (which causes Illegal invocation).
+    this.fetcher = (...args) => fetcher(...args);
+    this.pause = pause; this.last = 0; this.calls = 0;
+  }
   async get(url) {
     if (!official(url)) throw new SourceError('Refused nonofficial URL');
     for (let attempt = 0; attempt < 3; attempt++) {

@@ -116,6 +116,9 @@ test('source network retries are bounded and off-domain redirects refused',async
   const x=await call({op:'get',url:'https://esawebb.org/images/feed/',responses:Array(3).fill({throws:true})});assert.equal(x.calls.length,3);assert.match(x.error,/3 attempts/);
   const y=await call({op:'get',url:'https://esawebb.org/images/feed/',responses:[{status:302,headers:{location:'https://evil.test/'}}]});assert.equal(y.calls.length,1);assert.match(y.error,/Unsafe/);
 });
+test('source fetch does not bind the native function to its client instance',async()=>{
+  const x=await call({op:'get-receiver'});assert.equal(x.result,'native-fetch-compatible',JSON.stringify(x));
+});
 const verificationEnv={...env,DELIVERY_ENABLED:'false',EXPECTED_BOT_ID:'333333333333333333',EXPECTED_GUILD_NAME:'Fixture Server',EXPECTED_CHANNEL_NAME:'general',SETUP_CHECK_ID:'fixture-check-01'};
 const verificationResponses=()=>[
   {status:200,body:JSON.stringify({id:'333333333333333333',bot:true,username:'Daily Webb'})},
